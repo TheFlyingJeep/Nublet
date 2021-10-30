@@ -14,7 +14,6 @@ import os
 from ytmusicapi import YTMusic
 
 client = commands.Bot(command_prefix='.')
-api_key = 'd19e209d-e732-4f68-800e-f11ebff90a2b'
 uuid_cache = {}
 songq = []
 value = 0
@@ -57,6 +56,8 @@ duelactive = False
 
 with open("token.txt", "r") as t:
     token = t.read()
+with open("api_key.txt", "r") as api:
+    api_key = api.read()
 
 
 @client.event
