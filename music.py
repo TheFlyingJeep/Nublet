@@ -31,6 +31,7 @@ class BotServers:
         self.messagechannel = None
         self.is_playing = False
         self.ytmusicqueue = []
+        self.url = []
 
 
 async def get_song(obj, ctx, client, song):#WILL ADD SPOTIFY SUPPORT LATER
@@ -40,10 +41,12 @@ async def get_song(obj, ctx, client, song):#WILL ADD SPOTIFY SUPPORT LATER
         content = urllib.request.urlopen('http://www.youtube.com/results?' + link)
         searchresult = re.findall(r'/watch\?v=(.{11})', content.read().decode())
         url = ('http://www.youtube.com/watch?v=' + searchresult[0])
+        obj.url.append(url)
         with youtube_dl.YoutubeDL(ydl_opts) as YDL:
             info = YDL.extract_info(url, download=False)
         obj.queue.append(info)
     else:
+        obj.url.append(song)
         with youtube_dl.YoutubeDL(ydl_opts) as YDL:
             info = YDL.extract_info(song, download=False)
         obj.queue.append(info)
@@ -98,4 +101,4 @@ async def get_lyrics(ctx, obj):
             await ctx.send("```" + "".join(templyrics) + "```")
             await ctx.send("```" + temp + "```")
     else:
-        await ctx.send("Lyrics don't exist for this song :P")
+        await ctx.send("Lyrics don't exist for this song on ytmusicapi :P")

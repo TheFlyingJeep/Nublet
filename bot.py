@@ -4,11 +4,21 @@ import Hangman as Hms
 import register as r
 import dueldatagetter as ddg
 import music as p
+import math
+import valorant
 from discord.utils import get
 
 client = commands.Bot(command_prefix=".")
 with open("token.txt", "r") as t:
     token = t.read()
+#key = "RGAPI-d0ff9d74-b952-432b-a1fb-8d98686c257d"
+#CLIENT = valorant.AsyncClient(key)
+
+
+#@client.command()
+#async def getdata(ctx, username):
+#    person = await CLIENT.get_user_by_name(username)
+#    print(person)
 
 
 @client.event
@@ -30,6 +40,10 @@ async def on_message(message):
         with open("lureenyourmom.txt", "w") as lmom2:
             lmom2.write(str(int(count) + 1))
         await message.channel.send("Lauren has now made " + count + " HORRIBLE your mom jokes. TELL HER TO STOP")
+    elif message.content == "mommy" and message.author != client.user:
+        await message.channel.send("sorry")
+    elif message.content == "sorry" and message.author != client.user:
+        await message.channel.send("mommy")
     await client.process_commands(message)
 
 
@@ -110,6 +124,16 @@ async def play(ctx, *, song):
         await p.get_song(obj, ctx, client, song)
 
 
+@client.command(aliases=["dc"])
+async def leave(ctx):
+    if ctx.guild.id in p.servers:
+        bot = p.servers[ctx.guild.id]
+        if bot.vc_channel != ctx.author.voice.channel:
+            await ctx.send("You are not in my vc!")
+        else:
+            await ctx.voice_client.disconnect()
+
+
 @client.command(aliases=["s", "next", "n"])
 async def skip(ctx):
     try:
@@ -131,16 +155,45 @@ async def skip(ctx):
 @client.command(aliases=["q"])
 async def queue(ctx):
     if ctx.guild.id in p.servers:
-        out = "```"
-        bot = p.servers[ctx.guild.id]
-        num = 0
-        for a in bot.queue:
-            if num == bot.curnum:
-                out += "<Now playing> "
-            out += str(num + 1) + ": " + a["title"] + ": " + str(round(a["duration"] / 60)) + ":" + str(a["duration"] % 60) + "\n"
-            num += 1
-        out += f"The current queue number is: {str(bot.curnum + 1)}```"
-        await ctx.send(out)
+        obj = p.servers[ctx.guild.id]
+        try:
+            temp = ctx.message.content.split()[1]
+            try:
+                page = int(temp)
+                if page <= 0 or (page - 1) * 10 > len(obj.queue):
+                    await ctx.send("Your number must be in range of the queue")
+                    return
+                out = "```"
+                for num in range(math.floor(page - 1) * 10, ((math.floor(page - 1)) + 1) * 10):
+                    try:
+                        temp = obj.queue[num]
+                        if num == obj.curnum:
+                            out += "<Now playing> "
+                        seconds = obj.queue[num - 1]["duration"] % 60
+                        secondsstr = "0" + str(seconds) if seconds < 10 else str(seconds)
+                        out += str(num + 1) + ": " + obj.queue[num - 1]["title"] + " " + str(round(obj.queue[num - 1]["duration"] / 60)) + ":" + secondsstr + "\n"
+                    except IndexError:
+                        break
+                out += "Currently on song " + str(obj.curnum + 1) + "\n"
+                out += "Looping song: " + str(obj.is_looping) + ". " + "Looping queue: " + str(obj.is_looping_queue) + "```"
+                await ctx.send(out)
+            except ValueError:
+                await ctx.send("Give a NUMBER as an input (ex: .q 2)")
+        except IndexError:
+            out = "```"
+            for num in range(math.floor(obj.curnum/10) * 10, ((math.floor(obj.curnum/10)) + 1) * 10):
+                try:
+                    temp = obj.queue[num]
+                    if num == obj.curnum:
+                        out += "<Now playing> "
+                    seconds = obj.queue[num - 1]["duration"] % 60
+                    secondsstr = "0" + str(seconds) if seconds < 10 else str(seconds)
+                    out += str(num + 1) + ": " + obj.queue[num - 1]["title"] + " " +  str(round(obj.queue[num - 1]["duration"] / 60)) + ":" + secondsstr + "\n"
+                except IndexError:
+                    break
+            out += "Currently on song " + str(obj.curnum + 1) + "\n"
+            out += "Looping song: " + str(obj.is_looping) + ". " + "Looping queue: " + str(obj.is_looping_queue) + "```"
+            await ctx.send(out)
     else:
         await ctx.send("I'm not in a vc rn :P")
 
@@ -208,6 +261,14 @@ async def download(ctx, *, song):
         await ctx.send("You can't run this command! >:(")
     else:
         await p.downloader(ctx, song)
+
+
+@client.command(aliases=["np"])
+async def nowplaying(ctx):
+    if ctx.guild.id in p.servers:
+        await ctx.send(p.servers[ctx.guild.id].url[p.servers[ctx.guild.id].curnum])
+    else:
+        await ctx.send("I'm not in vc rn")
 
 
 client.run(token)
