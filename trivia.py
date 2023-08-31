@@ -1,120 +1,194 @@
 from pytrivia import Trivia, Category, Diffculty, Type
-import asyncio, time, random, discord
+import asyncio, time, random, discord, inspect
 api_req = Trivia(True)
 trivia_games = {}
+with open("categories.txt", "r") as cats:
+    categories = cats.read().splitlines()
+cat_map = Category.__dict__["_member_map_"]
+diff_map = Diffculty.__dict__["_member_map_"]
+diffs = ["Easy", "Medium", "Hard"]
 
-class TriviaQuestion:
-    def __init__(self, ctx, msg, client) -> None:
+class TriviaGame:
+    
+    def __init__(self, ctx, client, msg)->None:
         self.ctx = ctx
-        self.msg = msg
         self.client = client
-        self.started = False
+        self.msg = msg
+        self.skipped = False
+        self.joining = False
+        self.temp_channel = None
         self.players = [ctx.author]
-        self.channel = None
         self.scores = [0]
-        self.turn = 0
-        self.correct_answer = ""
-
-    async def joinLoop(self):
+        self.curturn = 0
+        self.question = None
+        self.correct_answer = None
+        self.no_answer_count = 0
+        
+    async def prepare_game(self):
+        self.joining = True
         for i in range(1,20):
             time.sleep(1)
-            await self.msg.edit(content=f"{self.ctx.author.mention} is starting a trivia game! You have {20-i} seconds to join by reacting to this message")
+            await self.msg.edit(content=f"{self.ctx.author.mention} is starting a trivia game! You have {20-i} seconds to join by reacting with a ✅.\nThe game originator can skip the countdown by reacting with a ⏩")
+            if self.skipped:
+                break
         if len(self.players) > 1:
-            await self.msg.edit(content="This game has already started. You can start a new one with ;trivia!")
-            self.started = True
+            self.joining = False
+            await self.msg.edit(content=f"This game has already started")
             self.channel = await self.msg.guild.create_text_channel(f"Trivia-game-{self.msg.id}")
             st = ""
             for i in self.players:
                 st += i.mention + " "
+            st += "\nFirst player to meet or exceed 9 points wins"
             await self.channel.send(st)
-            loop = asyncio.get_event_loop()
-            gameTask = loop.create_task(gameLoop(self))
-            await gameTask
+            await self.gameplay()
         else:
-            await self.msg.edit(content="There are not enough players to start this game")
+            await self.msg.edit(content="There were not enough players to start this game")
             del trivia_games[self.msg.id]
-
-    async def updateTurn(self):
-        self.turn += 1
-        if self.turn >= len(self.players):
-            self.turn = 0
-
-    async def askQuestion(self):
-        return api_req.request(1, None, None, None)
+            
+    async def get_question(self, cat, diff):
+        return api_req.request(1, cat, diff, Type.Multiple_Choice)
     
-    async def tryAnswer(self, ans, answers):
+    async def tryAnswer(self, ans, answers, points):
         if answers[ans].lower() == self.correct_answer.lower():
-            await self.channel.send(f"{self.players[self.turn].mention} has guessed the correct answer!")
-            self.scores[self.turn] += 1
+            await self.channel.send(f"{self.players[self.curturn].mention} has guessed the correct answer!")
+            self.scores[self.curturn] += points
         else:
-            await self.channel.send(f"{self.players[self.turn].mention} has guessed incorrectly! The correct answer was {self.correct_answer}")
-
-    async def endThread(self):
+            await self.channel.send(f"{self.players[self.curturn].mention} has guessed incorrectly! The correct answer was {self.correct_answer}")
+            
+    async def updateTurn(self):
+        self.curturn += 1
+        if self.curturn >= len(self.players):
+            self.curturn = 0
+            
+    async def end_game(self):
         del trivia_games[self.msg.id]
-
-async def startGame(ctx, bot):
-    msg = await ctx.send(f"{ctx.author.mention} is starting a trivia game! You have 20 seconds to join by reacting to this message")
-    await msg.add_reaction("✅")
-    trivia_games[msg.id] = TriviaQuestion(ctx, msg, bot)
-    await trivia_games[msg.id].joinLoop()
-
-async def tryJoin(payload):
-    game = trivia_games[payload.message_id]
-    if not game.started:
-        if payload.member not in game.players:
-            game.players.append(payload.member)
-            game.scores.append(0)
-
-async def gameLoop(self):
+    
+    async def gameplay(self):
         answers = {}
-
-        def ansCheck(p):
-            return p.author == self.players[self.turn] and p.channel == self.channel and p.content.lower().strip() in answers
-
-        while max(self.scores) < 5:
-            await self.channel.send(f"It is currently {self.players[self.turn].mention}'s turn")
-            question = await self.askQuestion()
-            await self.channel.send(question["results"][0]["question"])
-            whereAns = random.randint(0, 3)
-            st = "Answers are: \n"
-            addedCorrect = False
+        cats = {}
+        
+        def cat_check(p):
+            return p.author == self.players[self.curturn] and p.channel == self.channel and (p.content.strip().isnumeric() and int(p.content.strip()) in cats)
+        
+        def answer_check(p):
+            return p.author == self.players[self.curturn] and p.channel == self.channel and p.content.lower().strip() in answers
+        
+        def diff_check(p):
+            return p.author == self.players[self.curturn] and p.channel == self.channel and (p.content.strip().isnumeric() and int(p.content.strip()) in range(1,4))
+        
+        while max(self.scores) < 9:
+            await self.channel.send(f"It is now {self.players[self.curturn].mention}'s turn")
+            cats = {}
+            points = 0
             answers = {}
-            abcd = ["a", "b", "c", "d"]
-            l = 0
-            for i, v in enumerate(question["results"][0]["incorrect_answers"]):
-                if i == whereAns:
-                    answers[abcd[l]] = question["results"][0]["correct_answer"]
-                    st += abcd[l].upper() + ": " + question["results"][0]["correct_answer"] + "\n"
-                    l += 1
-                    addedCorrect = True
-                answers[abcd[l]] = question["results"][0]["incorrect_answers"][i]
-                st += abcd[l].upper() + ": " + v + "\n"
-                l += 1
-            if not addedCorrect:
-                answers[abcd[l]] = question["results"][0]["correct_answer"]
-                st += abcd[l].upper() + ": " + question["results"][0]["correct_answer"] + "\n"
-            await self.channel.send(st)
-            self.correct_answer = question["results"][0]["correct_answer"]
+            category = None
+            difficulty = None
+            answered = False
+            cat_msg = "Please pick your category by typing 1, 2, or 3: \n"
+            i = 0
+            temp = []
+            while i < 3:
+                cat = random.randint(0,23)
+                if cat not in temp:
+                    cats[i+1] = categories[cat]
+                    temp.append(cat)
+                    cat_msg += f"{i+1}: {categories[cat].replace('_', ' ')}\n"
+                    i+=1
+            await self.channel.send(cat_msg)
+            progressed = False
             try:
-                msg = await self.client.wait_for("message", timeout=20, check=ansCheck)
-                await self.tryAnswer(msg.content.lower().strip(), answers)
+                cat_select = await self.client.wait_for("message", timeout=10, check=cat_check)
+                category = cat_map[cats[int(cat_select.content.strip())]]
+                progressed = True
             except asyncio.TimeoutError:
-                await self.channel.send(f"{self.players[self.turn].mention} failed to answer the question in time. The correct answer is " + self.correct_answer)
-            finally:
-                emb = discord.Embed(title="Trivia game scores")
-                for i, v in enumerate(self.players):
-                    emb.add_field(name=v.name + ":", value="Score: " + str(self.scores[i]), inline=False)
-                await self.channel.send(embed=emb)
-                await self.updateTurn()
-                time.sleep(2)
-        ind = self.scores.index(5)
-        await self.channel.send(f"Game over! The winner was {self.players[ind].mention}")
+                await self.channel.send("Player took too long!")
+            if progressed:
+                progressed_further = False
+                await self.channel.send("Please select the difficulty you want:\n1: Easy (1 point)\n2: Medium (2 points)\n3: Hard (3 points)")
+                try:
+                    diff_select = await self.client.wait_for("message", timeout=10, check=diff_check)
+                    difficulty = diff_map[diffs[int(diff_select.content.strip())-1]]
+                    points = int(diff_select.content.strip())
+                    progressed_further = True
+                except asyncio.TimeoutError:
+                    await self.channel.send("Player took too long")
+                if progressed_further:
+                    question = await self.get_question(category, difficulty)
+                    await self.channel.send(question["results"][0]["question"])
+                    whereAns = random.randint(0, 3)
+                    st = "Answers are: \n"
+                    addedCorrect = False
+                    abcd = ["a", "b", "c", "d"]
+                    l = 0
+                    for i, v in enumerate(question["results"][0]["incorrect_answers"]):
+                        if i == whereAns:
+                            answers[abcd[l]] = question["results"][0]["correct_answer"]
+                            st += abcd[l].upper() + ": " + question["results"][0]["correct_answer"] + "\n"
+                            l += 1
+                            addedCorrect = True
+                        answers[abcd[l]] = question["results"][0]["incorrect_answers"][i]
+                        st += abcd[l].upper() + ": " + v + "\n"
+                        l += 1
+                    if not addedCorrect:
+                        answers[abcd[l]] = question["results"][0]["correct_answer"]
+                        st += abcd[l].upper() + ": " + question["results"][0]["correct_answer"] + "\n"
+                    await self.channel.send(st)
+                    self.correct_answer = question["results"][0]["correct_answer"]
+                    try:
+                        msg = await self.client.wait_for("message", timeout=20, check=answer_check)
+                        await self.tryAnswer(msg.content.lower().strip(), answers, points)
+                        answered = True
+                    except asyncio.TimeoutError:
+                        await self.channel.send(f"{self.players[self.curturn].mention} failed to answer the question in time. The correct answer is " + self.correct_answer)
+            if not answered:
+                self.no_answer_count += 1
+            else:
+                self.no_answer_count = 0
+            if self.no_answer_count >= len(self.players):
+                await self.channel.send("No one played for a whole round, game ending!")
+                break
+            emb = discord.Embed(title="Trivia game scores")
+            for i, v in enumerate(self.players):
+                emb.add_field(name=v.name + ":", value="Score: " + str(self.scores[i]), inline=False)
+            await self.channel.send(embed=emb)
+            await self.updateTurn()
+            time.sleep(2)
+        ind = self.scores.index(max(self.scores))
+        if max(self.scores) == 0:
+            await self.channel.send("Everybody is a loser!")
+        else:
+            await self.channel.send(f"Game over! The winner was {self.players[ind].mention}")
         time.sleep(1)
         embed = discord.Embed(title="Trivia game scores")
-        for i, v in enumerate(self.players):
-            scoreStr = "Score: " + str(self.scores[i])
-            scoreStr += " - WINNER" if self.scores[i] == 5 else ""
-            embed.add_field(name=v.name + ":", value=scoreStr, inline=False)
+        if self.scores.count(0) == len(self.scores):
+            for i, v in enumerate(self.players):
+                scoreStr = "Score: " + str(self.scores[i])
+                embed.add_field(name=v.name + ":", value=scoreStr, inline=False)
+            embed.add_field(name="Everybody is lameeee", value="Seriously, no points?")
+        else:
+            for i, v in enumerate(self.players):
+                scoreStr = "Score: " + str(self.scores[i])
+                scoreStr += " - WINNER" if i == ind else ""
+                embed.add_field(name=v.name + ":", value=scoreStr, inline=False)
         await self.channel.delete()
+        await self.msg.edit(content="This game has ended!")
         await self.ctx.send(embed=embed)
-        await self.endThread()
+        await self.end_game()
+
+async def prompt_players(ctx, bot):
+    msg = await ctx.send(f"{ctx.author.mention} is starting a trivia game! You have 20 seconds to join by reacting with a ✅.\nThe game originator can skip the countdown by reacting with a ⏩")
+    await msg.add_reaction("✅")
+    await msg.add_reaction("⏩")
+    trivia_games[msg.id] = TriviaGame(ctx, bot, msg)
+    await trivia_games[msg.id].prepare_game()
+            
+async def try_join(payload):
+    game = trivia_games[payload.message_id]
+    if game.joining and payload.member not in game.players:
+        game.players.append(payload.member)
+        game.scores.append(0)
+        
+async def try_start(payload):
+        game = trivia_games[payload.message_id]
+        if (game.joining and payload.member == game.ctx.author):
+            game.skipped = True
